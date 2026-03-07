@@ -3,19 +3,21 @@
 import { Loader2 } from "lucide-react";
 
 interface ProgressStepProps {
-  step: "ocr" | "parsing" | "checking";
+  step: "ocr" | "parsing" | "checking" | "saving";
 }
 
 const steps = {
   ocr: "Leyendo imagen con Puter.js OCR...",
   parsing: "Extrayendo datos del comprobante...",
   checking: "Verificando duplicados en base de datos...",
+  saving: "Guardando en base de datos...",
 };
 
 const progressWidth = {
-  ocr: "33%",
-  parsing: "66%",
-  checking: "95%",
+  ocr: "25%",
+  parsing: "50%",
+  checking: "75%",
+  saving: "95%",
 };
 
 export function ProgressStep({ step }: ProgressStepProps) {

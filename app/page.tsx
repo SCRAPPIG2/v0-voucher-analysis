@@ -2,12 +2,8 @@
 
 import { useState, useCallback, useEffect } from "react";
 import { cn } from "@/lib/utils";
-import type { VoucherData, FraudResult, StoredVoucher } from "@/lib/types";
-import {
-  checkDuplicates,
-  saveVoucher,
-  getDatabase,
-} from "@/lib/fraud-detection";
+import type { VoucherData, FraudResult } from "@/lib/types";
+import type { StoredVoucher } from "@/lib/db";
 import { parseVoucherText } from "@/lib/ocr-parser";
 import { loadPuterScript, extractTextFromImage } from "@/lib/puter-ocr";
 import { DropZone } from "@/components/drop-zone";
@@ -18,7 +14,7 @@ import { VoucherHistory } from "@/components/voucher-history";
 import { Upload, History, Shield, Zap } from "lucide-react";
 
 type Tab = "upload" | "historial";
-type Step = "idle" | "ocr" | "parsing" | "checking" | "done";
+type Step = "idle" | "ocr" | "parsing" | "checking" | "saving" | "done";
 
 export default function App() {
   const [tab, setTab] = useState<Tab>("upload");
@@ -28,11 +24,27 @@ export default function App() {
   const [fraud, setFraud] = useState<FraudResult | null>(null);
   const [history, setHistory] = useState<StoredVoucher[]>([]);
   const [puterReady, setPuterReady] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   // Cargar Puter.js
   useEffect(() => {
     loadPuterScript().then(setPuterReady);
   }, []);
+
+  // Cargar historial al montar
+  useEffect(() => {
+    loadHistory();
+  }, []);
+
+  const loadHistory = async () => {
+    try {
+      const res = await fetch('/api/vouchers?filter=all&limit=100');
+      const data = await res.json();
+      setHistory(data.vouchers || []);
+    } catch (err) {
+      console.error('Error loading history:', err);
+    }
+  };
 
   const handleFile = useCallback((file: File) => {
     const reader = new FileReader();
@@ -41,6 +53,7 @@ export default function App() {
       setExtracted(null);
       setFraud(null);
       setStep("idle");
+      setError(null);
     };
     reader.readAsDataURL(file);
   }, []);
@@ -49,6 +62,8 @@ export default function App() {
     if (!image) return;
 
     try {
+      setError(null);
+
       // PASO 1: OCR
       setStep("ocr");
       const text = await extractTextFromImage(image, puterReady);
@@ -59,17 +74,31 @@ export default function App() {
       const data = parseVoucherText(text);
       setExtracted(data);
 
-      // PASO 3: Verificar duplicados
+      // PASO 3: Verificar duplicados y guardar en BD
       setStep("checking");
       await new Promise((r) => setTimeout(r, 500));
-      const result = checkDuplicates(data);
-      setFraud(result);
 
-      // Guardar
-      saveVoucher(data, result);
-      setHistory([...getDatabase()].reverse());
+      // Enviar a API para análisis y guardado
+      setStep("saving");
+      const response = await fetch('/api/analyze-voucher', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ voucherData: data }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Error al guardar el voucher');
+      }
+
+      const result = await response.json();
+      setFraud(result.fraudAnalysis);
+
+      // Recargar historial
+      await loadHistory();
       setStep("done");
     } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : 'Error desconocido';
+      setError(errorMsg);
       console.error(err);
       setStep("idle");
     }
@@ -133,7 +162,14 @@ export default function App() {
               {/* PROGRESO */}
               {step !== "idle" && step !== "done" && (
                 <div className="mt-4">
-                  <ProgressStep step={step as "ocr" | "parsing" | "checking"} />
+                  <ProgressStep step={step as "ocr" | "parsing" | "checking" | "saving"} />
+                </div>
+              )}
+
+              {/* ERROR */}
+              {error && (
+                <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg">
+                  <p className="text-xs text-red-700 font-mono">{error}</p>
                 </div>
               )}
 

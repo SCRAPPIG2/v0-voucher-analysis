@@ -26,9 +26,10 @@ export interface FraudResult {
 }
 
 export interface StoredVoucher extends VoucherData {
-  id: string;
+  id: number;
   created_at: string;
+  updated_at: string;
   fraud_score: number;
-  fraud_status: string;
-  fraud_flags: string;
+  fraud_status: 'CLEAN' | 'SUSPICIOUS' | 'DUPLICATE';
+  fraud_flags: string[];
 }

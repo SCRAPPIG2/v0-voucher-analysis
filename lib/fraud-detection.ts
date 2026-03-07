@@ -1,15 +1,11 @@
-import type { VoucherData, FraudResult, StoredVoucher } from "./types";
+import type { VoucherData, FraudResult } from "./types";
 
 // ============================================================
-// BASE DE DATOS LOCAL (en memoria - persiste durante la sesion)
+// DETECCION DE FRAUDE - Logica pura
+// Esta funcion se ejecuta en el cliente y en el servidor
 // ============================================================
-const DB: StoredVoucher[] = [];
 
-export function getDatabase(): StoredVoucher[] {
-  return DB;
-}
-
-export function checkDuplicates(data: VoucherData): FraudResult {
+export function checkDuplicates(data: VoucherData, existingVouchers: VoucherData[] = []): FraudResult {
   const flags: string[] = [];
   let score = 0;
   let duplicateOf: VoucherData | null = null;
@@ -18,7 +14,7 @@ export function checkDuplicates(data: VoucherData): FraudResult {
   const normalize = (s: string | null | undefined): string => 
     (s || '').toLowerCase().trim().replace(/\s+/g, '');
 
-  for (const v of DB) {
+  for (const v of existingVouchers) {
     // CHECK 1: Reference/Comprobante duplicado (CRITICO - 100% fraude)
     if (
       data.reference_number &&
@@ -118,20 +114,4 @@ export function checkDuplicates(data: VoucherData): FraudResult {
     fraudFlags: flags,
     duplicateOf,
   };
-}
-
-export function saveVoucher(
-  data: VoucherData,
-  result: FraudResult
-): StoredVoucher {
-  const v: StoredVoucher = {
-    ...data,
-    id: Math.random().toString(36).slice(2),
-    created_at: new Date().toISOString(),
-    fraud_score: result.fraudScore,
-    fraud_status: result.fraudStatus,
-    fraud_flags: JSON.stringify(result.fraudFlags),
-  };
-  DB.push(v);
-  return v;
 }
