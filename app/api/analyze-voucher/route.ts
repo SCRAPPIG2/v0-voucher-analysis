@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { checkDuplicates } from '@/lib/fraud-detection';
-import { saveVoucher, findDuplicateByReference, createFraudAlert } from '@/lib/db';
+import { getAllVouchers, addVoucher } from '@/lib/memory-cache';
 import type { VoucherData } from '@/lib/types';
 
 export const runtime = 'nodejs';
@@ -21,46 +21,20 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Realizar análisis de fraude (sin BD aun, solo logica)
-    const fraudResult = checkDuplicates(voucherData);
+    // Obtener todos los vouchers existentes para comparacion
+    const existingVouchers = getAllVouchers();
+    const fraudResult = checkDuplicates(voucherData, existingVouchers);
 
-    // Guardar en base de datos
-    const storedVoucher = await saveVoucher(
-      voucherData,
-      fraudResult.fraudStatus,
-      fraudResult.fraudScore,
-      fraudResult.fraudFlags
-    );
+    // Crear el voucher para guardar
+    const voucherToStore = {
+      ...voucherData,
+      fraud_status: fraudResult.fraudStatus as 'CLEAN' | 'SUSPICIOUS' | 'DUPLICATE',
+      fraud_score: fraudResult.fraudScore,
+      fraud_flags: fraudResult.fraudFlags,
+    };
 
-    // Si detectamos un duplicado, crear alerta
-    if (
-      fraudResult.fraudStatus === 'DUPLICATE' &&
-      fraudResult.duplicateOf
-    ) {
-      // Buscar el ID del voucher original en la DB
-      const originalVoucher = await findDuplicateByReference(
-        fraudResult.duplicateOf.reference_number || '',
-        fraudResult.duplicateOf.bank_origin
-      );
-
-      if (originalVoucher) {
-        await createFraudAlert(
-          storedVoucher.id,
-          originalVoucher.id,
-          'DUPLICATE',
-          `Comprobante duplicado: ${voucherData.reference_number}`,
-          'CRITICAL'
-        );
-      }
-    } else if (fraudResult.fraudStatus === 'SUSPICIOUS') {
-      await createFraudAlert(
-        storedVoucher.id,
-        storedVoucher.id,
-        'SUSPICIOUS',
-        fraudResult.fraudFlags.join(' | '),
-        'HIGH'
-      );
-    }
+    // Guardar en cache en memoria
+    const storedVoucher = addVoucher(voucherToStore as any);
 
     return NextResponse.json({
       success: true,
@@ -70,11 +44,15 @@ export async function POST(request: NextRequest) {
         score: fraudResult.fraudScore,
         flags: fraudResult.fraudFlags,
       },
+      stored: true,
     });
   } catch (error) {
     console.error('Error analyzing voucher:', error);
     return NextResponse.json(
-      { error: 'Failed to analyze voucher' },
+      { 
+        error: error instanceof Error ? error.message : 'Failed to analyze voucher',
+        success: false,
+      },
       { status: 500 }
     );
   }

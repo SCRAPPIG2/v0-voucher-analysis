@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAllVouchers, getVouchersByStatus, getFraudulentVouchers } from '@/lib/db';
+import { 
+  getAllVouchers, 
+  getVouchersByStatus,
+  getVoucherCount
+} from '@/lib/memory-cache';
 
 export const runtime = 'nodejs';
 
@@ -13,30 +17,28 @@ export async function GET(request: NextRequest) {
 
     switch (filter) {
       case 'duplicates':
-        vouchers = await getVouchersByStatus('DUPLICATE', limit);
+        vouchers = getVouchersByStatus('DUPLICATE').slice(0, limit);
         break;
       case 'suspicious':
-        vouchers = await getVouchersByStatus('SUSPICIOUS', limit);
+        vouchers = getVouchersByStatus('SUSPICIOUS').slice(0, limit);
         break;
       case 'clean':
-        vouchers = await getVouchersByStatus('CLEAN', limit);
-        break;
-      case 'fraud':
-        vouchers = await getFraudulentVouchers();
+        vouchers = getVouchersByStatus('CLEAN').slice(0, limit);
         break;
       default:
-        vouchers = await getAllVouchers(limit);
+        vouchers = getAllVouchers().slice(0, limit);
     }
 
     return NextResponse.json({
       success: true,
       count: vouchers.length,
+      total: getVoucherCount(),
       vouchers,
     });
   } catch (error) {
     console.error('Error fetching vouchers:', error);
     return NextResponse.json(
-      { error: 'Failed to fetch vouchers' },
+      { error: 'Failed to fetch vouchers', success: false },
       { status: 500 }
     );
   }
