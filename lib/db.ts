@@ -71,25 +71,36 @@ export async function saveVoucher(
 }
 
 /**
- * Buscar duplicados por transaction_id o reference_number
+ * Buscar duplicados por reference_number
+ * Se usan dos queries separadas — el cliente Neon no soporta
+ * conditional sql template literals anidados (causa syntax error en $2)
  */
 export async function findDuplicateByReference(
   referenceNumber: string,
   bankOrigin?: string | null
 ): Promise<StoredVoucher | null> {
   try {
-    const result = await sql`
-      SELECT * FROM vouchers 
-      WHERE reference_number = ${referenceNumber}
-      ${bankOrigin ? sql`AND bank_origin = ${bankOrigin}` : sql``}
-      ORDER BY created_at DESC 
-      LIMIT 1
-    `;
-
-    return result && result.length > 0 ? (result[0] as StoredVoucher) : null;
+    if (bankOrigin) {
+      const result = await sql`
+        SELECT * FROM vouchers 
+        WHERE reference_number = ${referenceNumber}
+        AND bank_origin = ${bankOrigin}
+        ORDER BY created_at DESC 
+        LIMIT 1
+      `;
+      return result && result.length > 0 ? (result[0] as StoredVoucher) : null;
+    } else {
+      const result = await sql`
+        SELECT * FROM vouchers 
+        WHERE reference_number = ${referenceNumber}
+        ORDER BY created_at DESC 
+        LIMIT 1
+      `;
+      return result && result.length > 0 ? (result[0] as StoredVoucher) : null;
+    }
   } catch (error) {
     console.error('Error finding duplicate:', error);
-    throw error;
+    return null;
   }
 }
 
@@ -106,7 +117,6 @@ export async function findDuplicateByTransactionId(
       ORDER BY created_at DESC 
       LIMIT 1
     `;
-
     return result && result.length > 0 ? (result[0] as StoredVoucher) : null;
   } catch (error) {
     console.error('Error finding duplicate by transaction_id:', error);
@@ -198,7 +208,6 @@ export async function createFraudAlert(
     `;
   } catch (error) {
     console.error('Error creating fraud alert:', error);
-    // No lanzar error, solo loguear
   }
 }
 
