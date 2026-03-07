@@ -14,52 +14,51 @@ export function checkDuplicates(data: VoucherData): FraudResult {
   let score = 0;
   let duplicateOf: VoucherData | null = null;
 
+  // Normalizar para comparacion
+  const normalize = (s: string | null | undefined): string => 
+    (s || '').toLowerCase().trim().replace(/\s+/g, '');
+
   for (const v of DB) {
-    // CHECK 1: Transaction ID duplicado
+    // CHECK 1: Reference/Comprobante duplicado (CRITICO - 100% fraude)
     if (
-      data.transaction_id &&
-      v.transaction_id &&
-      data.transaction_id.toLowerCase().trim() ===
-        v.transaction_id.toLowerCase().trim()
+      data.reference_number &&
+      v.reference_number &&
+      normalize(data.reference_number) === normalize(v.reference_number)
     ) {
       score = 100;
       duplicateOf = v;
       flags.push(
-        `Transaction ID "${data.transaction_id}" ya registrado el ${new Date(v.created_at).toLocaleDateString("es-CO")}`
+        `ALERTA: Comprobante/Referencia "${data.reference_number}" YA REGISTRADO el ${new Date(v.created_at).toLocaleDateString("es-CO")}`
+      );
+      break; // No necesitamos mas checks
+    }
+
+    // CHECK 2: Transaction ID duplicado (CRITICO - 100% fraude)
+    if (
+      data.transaction_id &&
+      v.transaction_id &&
+      normalize(data.transaction_id) === normalize(v.transaction_id)
+    ) {
+      score = 100;
+      duplicateOf = v;
+      flags.push(
+        `ALERTA: Transaction ID "${data.transaction_id}" YA REGISTRADO el ${new Date(v.created_at).toLocaleDateString("es-CO")}`
       );
       break;
     }
-    // CHECK 2: Mismo reference_number + banco
+
+    // CHECK 3: Serial/Numero de cuenta duplicado
     if (
-      !duplicateOf &&
-      data.reference_number &&
-      v.reference_number &&
-      data.bank_origin &&
-      v.bank_origin &&
-      data.reference_number.toLowerCase().trim() ===
-        v.reference_number.toLowerCase().trim() &&
-      data.bank_origin.toLowerCase().trim() ===
-        v.bank_origin.toLowerCase().trim()
-    ) {
-      score = Math.max(score, 90);
-      duplicateOf = v;
-      flags.push(
-        `Referencia "${data.reference_number}" del banco "${data.bank_origin}" ya existe`
-      );
-    }
-    // CHECK 3: Mismo serial
-    if (
-      !duplicateOf &&
       data.bank_serial &&
       v.bank_serial &&
-      data.bank_serial.toLowerCase().trim() ===
-        v.bank_serial.toLowerCase().trim()
+      normalize(data.bank_serial) === normalize(v.bank_serial)
     ) {
-      score = Math.max(score, 90);
-      duplicateOf = v;
-      flags.push(`Serial "${data.bank_serial}" ya registrado`);
+      score = Math.max(score, 95);
+      duplicateOf = duplicateOf || v;
+      flags.push(`Serial/Comprobante "${data.bank_serial}" ya registrado anteriormente`);
     }
-    // CHECK 4: Mismo monto + beneficiario + fecha
+
+    // CHECK 4: Mismo monto + beneficiario + fecha (MUY SOSPECHOSO)
     if (
       data.amount &&
       v.amount &&
@@ -68,23 +67,50 @@ export function checkDuplicates(data: VoucherData): FraudResult {
       data.issue_date &&
       v.issue_date &&
       data.amount === v.amount &&
-      data.beneficiary.toLowerCase().trim() ===
-        v.beneficiary.toLowerCase().trim() &&
+      normalize(data.beneficiary) === normalize(v.beneficiary) &&
       data.issue_date === v.issue_date
     ) {
-      score = Math.max(score, 60);
+      score = Math.max(score, 80);
       duplicateOf = duplicateOf || v;
-      flags.push(`Mismo monto y beneficiario en la misma fecha`);
+      flags.push(`SOSPECHOSO: Mismo monto ($${data.amount.toLocaleString('es-CO')}) al mismo beneficiario (${data.beneficiary}) en la misma fecha`);
+    }
+
+    // CHECK 5: Mismo monto + fecha (diferente beneficiario) - posible split
+    if (
+      data.amount &&
+      v.amount &&
+      data.issue_date &&
+      v.issue_date &&
+      data.amount === v.amount &&
+      data.issue_date === v.issue_date &&
+      normalize(data.beneficiary) !== normalize(v.beneficiary)
+    ) {
+      score = Math.max(score, 40);
+      flags.push(`Mismo monto en la misma fecha a diferente beneficiario`);
+    }
+
+    // CHECK 6: Mismo beneficiario multiples veces el mismo dia
+    if (
+      data.beneficiary &&
+      v.beneficiary &&
+      data.issue_date &&
+      v.issue_date &&
+      normalize(data.beneficiary) === normalize(v.beneficiary) &&
+      data.issue_date === v.issue_date
+    ) {
+      score = Math.max(score, 30);
+      flags.push(`Multiples transferencias al mismo beneficiario en el mismo dia`);
     }
   }
 
-  if (!data.transaction_id && !data.reference_number) {
-    score = Math.max(score, 20);
-    flags.push("Sin numero de transaccion — no se puede garantizar unicidad");
+  // Penalizar si faltan datos criticos
+  if (!data.reference_number && !data.transaction_id && !data.bank_serial) {
+    score = Math.max(score, 50);
+    flags.push("ADVERTENCIA: Sin numero de comprobante/referencia - imposible verificar unicidad");
   }
 
   const fraudStatus: "CLEAN" | "SUSPICIOUS" | "DUPLICATE" =
-    score >= 70 ? "DUPLICATE" : score >= 35 ? "SUSPICIOUS" : "CLEAN";
+    score >= 80 ? "DUPLICATE" : score >= 30 ? "SUSPICIOUS" : "CLEAN";
 
   return {
     fraudScore: Math.min(score, 100),

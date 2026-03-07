@@ -1,12 +1,16 @@
 import type { VoucherData } from "./types";
 
 // ============================================================
-// MESES EN ESPANOL
+// MESES EN ESPANOL (completos y abreviados)
 // ============================================================
 const MESES: Record<string, string> = {
-  enero: "01", febrero: "02", marzo: "03", abril: "04",
-  mayo: "05", junio: "06", julio: "07", agosto: "08",
-  septiembre: "09", octubre: "10", noviembre: "11", diciembre: "12"
+  enero: "01", ene: "01", feb: "02", febrero: "02", 
+  marzo: "03", mar: "03", abril: "04", abr: "04",
+  mayo: "05", may: "05", junio: "06", jun: "06", 
+  julio: "07", jul: "07", agosto: "08", ago: "08",
+  septiembre: "09", sep: "09", sept: "09", 
+  octubre: "10", oct: "10", noviembre: "11", nov: "11", 
+  diciembre: "12", dic: "12"
 };
 
 // ============================================================
@@ -41,19 +45,33 @@ export function parseVoucherText(text: string): VoucherData {
   }
 
   // ============================================================
-  // FECHA - Formatos: DD/MM/YYYY, DD de mes de YYYY, etc.
+  // FECHA - Multiples formatos colombianos
   // ============================================================
   let issue_date: string | null = null;
   
-  // Formato Nequi: "06 de marzo de 2026 a las 03:50 p.m."
-  const fechaTextoMatch = normalizedText.match(/(\d{1,2})\s*de\s*([a-záéíóú]+)\s*(?:de|del)?\s*(\d{4})/i);
-  if (fechaTextoMatch) {
-    const dia = fechaTextoMatch[1].padStart(2, "0");
-    const mesNombre = fechaTextoMatch[2].toLowerCase();
-    const ano = fechaTextoMatch[3];
+  // Formato Bancolombia: "06 Mar 2026" o "06 Mar 2026 - 10:18 a m."
+  const fechaBancolombiaMatch = normalizedText.match(/(\d{1,2})\s+([A-Za-z]{3,})\s+(\d{4})/i);
+  if (fechaBancolombiaMatch) {
+    const dia = fechaBancolombiaMatch[1].padStart(2, "0");
+    const mesNombre = fechaBancolombiaMatch[2].toLowerCase();
+    const ano = fechaBancolombiaMatch[3];
     const mes = MESES[mesNombre];
     if (mes) {
       issue_date = `${ano}-${mes}-${dia}`;
+    }
+  }
+  
+  // Formato Nequi: "06 de marzo de 2026 a las 03:50 p.m."
+  if (!issue_date) {
+    const fechaTextoMatch = normalizedText.match(/(\d{1,2})\s*de\s*([a-záéíóú]+)\s*(?:de|del)?\s*(\d{4})/i);
+    if (fechaTextoMatch) {
+      const dia = fechaTextoMatch[1].padStart(2, "0");
+      const mesNombre = fechaTextoMatch[2].toLowerCase();
+      const ano = fechaTextoMatch[3];
+      const mes = MESES[mesNombre];
+      if (mes) {
+        issue_date = `${ano}-${mes}-${dia}`;
+      }
     }
   }
   
@@ -75,9 +93,12 @@ export function parseVoucherText(text: string): VoucherData {
   }
 
   // ============================================================
-  // REFERENCIA - Nequi usa "Referencia" seguido de codigo
+  // REFERENCIA/COMPROBANTE - Bancolombia y Nequi
   // ============================================================
   const reference_number = find(
+    // Bancolombia: "Comprobante No. 0000048000"
+    /Comprobante\s*(?:No\.?|N[uú]mero)?[:\s]*([0-9]{6,15})/i,
+    // Nequi: "Referencia M14046333"
     /Referencia[:\s]*([A-Z0-9]{5,20})/i,
     /(?:N[uú]m(?:ero)?\.?\s*(?:de\s*)?(?:referencia|aprobaci[oó]n))[:\s#]*([A-Z0-9\-]{4,20})/i,
     /(?:Aprobaci[oó]n|Auth|REF)[:\s.#]+([A-Z0-9\-]{4,20})/i,
@@ -85,26 +106,34 @@ export function parseVoucherText(text: string): VoucherData {
   );
 
   // ============================================================
-  // BENEFICIARIO - Nequi usa "Para" seguido del nombre
+  // BENEFICIARIO - Bancolombia y Nequi
   // ============================================================
   const beneficiary = find(
+    // Bancolombia: Producto destino seguido de nombre en mayusculas
+    /Producto\s*destino[^\n]*\n\s*([A-Z]{2,}[A-Z\s]*)/i,
+    // Nequi: "Para" seguido del nombre
     /Para\s*\n?\s*([A-Za-záéíóúñÁÉÍÓÚÑ\s]{3,50}?)(?:\n|$)/i,
     /(?:Beneficiario|Destinatario|A\s*nombre\s*de)[:\s]*([A-Za-záéíóúñÁÉÍÓÚÑ\s]{3,50})(?:\n|,|$)/i,
     /(?:Nombre|Titular)[:\s]*([A-Za-záéíóúñÁÉÍÓÚÑ\s]{3,50})(?:\n|,|$)/i
   );
 
   // ============================================================
-  // NUMERO NEQUI/CELULAR - Puede servir como identificador
+  // NUMERO DE CUENTA - Bancolombia y Nequi
   // ============================================================
-  const nequiNumber = find(
+  const accountNumber = find(
+    // Bancolombia: "799 - 000260 - 19" o "*5743"
+    /([0-9]{3}\s*-\s*[0-9]{6}\s*-\s*[0-9]{2})/,
+    /\*([0-9]{4})/,
+    // Nequi: numero de celular
     /N[uú]mero\s*Nequi[:\s]*([0-9\s]{10,15})/i,
     /(?:Celular|Tel[eé]fono|N[uú]mero)[:\s]*([0-9\s]{10,15})/i
   );
   
-  // Usar numero Nequi como bank_serial si no hay otro
+  // Usar numero de cuenta o comprobante como serial
   const bank_serial = find(
-    /(?:Serial|Comprobante\s*N[oó]?)[:\s#]*([A-Z0-9\-]{4,20})/i
-  ) || (nequiNumber ? nequiNumber.replace(/\s/g, '') : null);
+    /Comprobante\s*(?:No\.?|N[uú]mero)?[:\s]*([0-9]{6,15})/i,
+    /(?:Serial)[:\s#]*([A-Z0-9\-]{4,20})/i
+  ) || (accountNumber ? accountNumber.replace(/\s/g, '') : null);
 
   // ============================================================
   // TRANSACTION ID
@@ -115,25 +144,46 @@ export function parseVoucherText(text: string): VoucherData {
   ) || reference_number; // Usar referencia como fallback para transaction_id
 
   // ============================================================
-  // BANCO ORIGEN - Detectar por nombre de app/banco
+  // BANCO ORIGEN - Detectar por contexto del voucher
   // ============================================================
-  const bank_origin = find(
-    /(?:Banco\s*(?:origen|emisor))[:\s]*([A-Za-záéíóúñ\s]+?)(?:\n|,|$)/i,
-    /(Bancolombia|Banco\s*de\s*Bogot[aá]|Davivienda|BBVA|Banco\s*Popular|Scotiabank|Colpatria|Caja\s*Social)/i
-  ) || (normalizedText.toLowerCase().includes('nequi') ? 'Nequi' : null)
-    || (normalizedText.toLowerCase().includes('daviplata') ? 'Daviplata' : null);
+  const detectBank = (): string | null => {
+    const lowerText = normalizedText.toLowerCase();
+    // Bancolombia tiene "Transferencia exitosa" y "Producto destino/origen"
+    if (lowerText.includes('transferencia exitosa') || lowerText.includes('producto destino') || lowerText.includes('producto origen')) {
+      return 'Bancolombia';
+    }
+    if (lowerText.includes('nequi') || lowerText.includes('envio realizado')) {
+      return 'Nequi';
+    }
+    if (lowerText.includes('daviplata')) {
+      return 'Daviplata';
+    }
+    // Buscar mencion explicita del banco
+    const bankMatch = normalizedText.match(/(Bancolombia|Banco\s*de\s*Bogot[aá]|Davivienda|BBVA|Banco\s*Popular|Scotiabank|Colpatria|Caja\s*Social)/i);
+    return bankMatch ? bankMatch[1] : null;
+  };
+  const bank_origin = detectBank();
 
   // ============================================================
   // TIPO DE TRANSFERENCIA
   // ============================================================
-  let transfer_type = find(
-    /(PSE|ACH|Transfiya|Wire|Interbancaria)/i
-  );
-  if (!transfer_type) {
-    if (normalizedText.toLowerCase().includes('nequi')) transfer_type = 'Nequi';
-    else if (normalizedText.toLowerCase().includes('daviplata')) transfer_type = 'Daviplata';
-    else if (normalizedText.toLowerCase().includes('env[ií]o')) transfer_type = 'Envio';
-  }
+  const detectTransferType = (): string | null => {
+    const lowerText = normalizedText.toLowerCase();
+    if (lowerText.includes('transferencia exitosa') || lowerText.includes('producto destino')) {
+      return 'Transferencia Bancolombia';
+    }
+    if (lowerText.includes('envio realizado') || lowerText.includes('nequi')) {
+      return 'Envio Nequi';
+    }
+    if (lowerText.includes('daviplata')) {
+      return 'Daviplata';
+    }
+    if (lowerText.includes('pse')) return 'PSE';
+    if (lowerText.includes('ach')) return 'ACH';
+    if (lowerText.includes('transfiya')) return 'Transfiya';
+    return null;
+  };
+  const transfer_type = detectTransferType();
 
   // ============================================================
   // ORDENANTE/REMITENTE

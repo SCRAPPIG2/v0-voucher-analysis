@@ -52,13 +52,11 @@ export default function App() {
       // PASO 1: OCR
       setStep("ocr");
       const text = await extractTextFromImage(image, puterReady);
-      console.log("[v0] OCR RAW TEXT:", text);
 
       // PASO 2: Parsear
       setStep("parsing");
       await new Promise((r) => setTimeout(r, 400));
       const data = parseVoucherText(text);
-      console.log("[v0] PARSED DATA:", data);
       setExtracted(data);
 
       // PASO 3: Verificar duplicados
