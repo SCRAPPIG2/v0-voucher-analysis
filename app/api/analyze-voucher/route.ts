@@ -1,6 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { checkDuplicates } from '@/lib/fraud-detection';
-import { saveVoucher, findDuplicateByReference, createFraudAlert } from '@/lib/db';
+import {
+  saveVoucher,
+  findDuplicateByReference,
+  findDuplicateByTransactionId,
+  createFraudAlert,
+  getAllVouchers,
+} from '@/lib/db';
 import type { VoucherData } from '@/lib/types';
 
 export const runtime = 'nodejs';
@@ -21,10 +27,14 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Realizar análisis de fraude (sin BD aun, solo logica)
-    const fraudResult = checkDuplicates(voucherData);
+    // ── PASO 1: Traer vouchers existentes para comparar ──────────────
+    // Sin esto, checkDuplicates nunca detecta nada (recibía array vacío)
+    const existingVouchers = await getAllVouchers(500);
 
-    // Guardar en base de datos
+    // ── PASO 2: Detección de duplicados con datos reales de la BD ─────
+    const fraudResult = checkDuplicates(voucherData, existingVouchers);
+
+    // ── PASO 3: Guardar el nuevo voucher ──────────────────────────────
     const storedVoucher = await saveVoucher(
       voucherData,
       fraudResult.fraudStatus,
@@ -32,23 +42,30 @@ export async function POST(request: NextRequest) {
       fraudResult.fraudFlags
     );
 
-    // Si detectamos un duplicado, crear alerta
-    if (
-      fraudResult.fraudStatus === 'DUPLICATE' &&
-      fraudResult.duplicateOf
-    ) {
-      // Buscar el ID del voucher original en la DB
-      const originalVoucher = await findDuplicateByReference(
-        fraudResult.duplicateOf.reference_number || '',
-        fraudResult.duplicateOf.bank_origin
-      );
+    // ── PASO 4: Crear alertas si corresponde ──────────────────────────
+    if (fraudResult.fraudStatus === 'DUPLICATE' && fraudResult.duplicateOf) {
+      // Buscar el ID del voucher original en la DB por reference o transaction_id
+      let originalVoucher = null;
 
-      if (originalVoucher) {
+      if (fraudResult.duplicateOf.reference_number) {
+        originalVoucher = await findDuplicateByReference(
+          fraudResult.duplicateOf.reference_number,
+          fraudResult.duplicateOf.bank_origin
+        );
+      }
+
+      if (!originalVoucher && fraudResult.duplicateOf.transaction_id) {
+        originalVoucher = await findDuplicateByTransactionId(
+          fraudResult.duplicateOf.transaction_id
+        );
+      }
+
+      if (originalVoucher && originalVoucher.id !== storedVoucher.id) {
         await createFraudAlert(
           storedVoucher.id,
           originalVoucher.id,
           'DUPLICATE',
-          `Comprobante duplicado: ${voucherData.reference_number}`,
+          `Comprobante duplicado: ${voucherData.reference_number || voucherData.transaction_id}`,
           'CRITICAL'
         );
       }
@@ -62,13 +79,16 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // ── PASO 5: Response con los campos que espera page.tsx ───────────
+    // IMPORTANTE: page.tsx usa result.fraudAnalysis con fraudStatus/fraudScore/fraudFlags
     return NextResponse.json({
       success: true,
       voucher: storedVoucher,
       fraudAnalysis: {
-        status: fraudResult.fraudStatus,
-        score: fraudResult.fraudScore,
-        flags: fraudResult.fraudFlags,
+        fraudStatus: fraudResult.fraudStatus,   // antes: status
+        fraudScore: fraudResult.fraudScore,     // antes: score
+        fraudFlags: fraudResult.fraudFlags,     // antes: flags
+        duplicateOf: fraudResult.duplicateOf,
       },
     });
   } catch (error) {
