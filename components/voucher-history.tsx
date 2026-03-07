@@ -13,17 +13,20 @@ interface VoucherHistoryProps {
 type FilterStatus = "ALL" | "DUPLICATE" | "SUSPICIOUS" | "CLEAN";
 
 export function VoucherHistory({ history }: VoucherHistoryProps) {
+  // Guarda defensiva: garantiza que siempre sea un array aunque llegue undefined
+  const safeHistory = Array.isArray(history) ? history : [];
+
   const [filterStatus, setFilterStatus] = useState<FilterStatus>("ALL");
 
-  const filteredHistory = history.filter(
+  const filteredHistory = safeHistory.filter(
     (v) => filterStatus === "ALL" || v.fraud_status === filterStatus
   );
 
   const counts = {
-    ALL: history.length,
-    DUPLICATE: history.filter((v) => v.fraud_status === "DUPLICATE").length,
-    SUSPICIOUS: history.filter((v) => v.fraud_status === "SUSPICIOUS").length,
-    CLEAN: history.filter((v) => v.fraud_status === "CLEAN").length,
+    ALL: safeHistory.length,
+    DUPLICATE: safeHistory.filter((v) => v.fraud_status === "DUPLICATE").length,
+    SUSPICIOUS: safeHistory.filter((v) => v.fraud_status === "SUSPICIOUS").length,
+    CLEAN: safeHistory.filter((v) => v.fraud_status === "CLEAN").length,
   };
 
   const filters: { id: FilterStatus; label: string }[] = [
