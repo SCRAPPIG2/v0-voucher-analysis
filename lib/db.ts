@@ -38,8 +38,7 @@ export async function saveVoucher(
         payment_concept,
         fraud_status,
         fraud_score,
-        fraud_flags,
-        raw_ocr_text
+        fraud_flags
       ) VALUES (
         ${data.reference_number || null},
         ${data.transaction_id || null},
@@ -55,8 +54,7 @@ export async function saveVoucher(
         ${data.payment_concept || null},
         ${fraudStatus},
         ${fraudScore},
-        ${JSON.stringify(fraudFlags)},
-        ${data.raw_text || null}
+        ${JSON.stringify(fraudFlags)}
       )
       RETURNING *
     `;
@@ -73,7 +71,7 @@ export async function saveVoucher(
 }
 
 /**
- * Buscar duplicados por referencia exacta
+ * Buscar duplicados por transaction_id o reference_number
  */
 export async function findDuplicateByReference(
   referenceNumber: string,
@@ -92,6 +90,27 @@ export async function findDuplicateByReference(
   } catch (error) {
     console.error('Error finding duplicate:', error);
     throw error;
+  }
+}
+
+/**
+ * Buscar duplicados por transaction_id
+ */
+export async function findDuplicateByTransactionId(
+  transactionId: string
+): Promise<StoredVoucher | null> {
+  try {
+    const result = await sql`
+      SELECT * FROM vouchers 
+      WHERE transaction_id = ${transactionId}
+      ORDER BY created_at DESC 
+      LIMIT 1
+    `;
+
+    return result && result.length > 0 ? (result[0] as StoredVoucher) : null;
+  } catch (error) {
+    console.error('Error finding duplicate by transaction_id:', error);
+    return null;
   }
 }
 
