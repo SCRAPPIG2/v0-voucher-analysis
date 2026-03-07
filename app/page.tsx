@@ -3,7 +3,7 @@
 import { useState, useCallback, useEffect } from "react";
 import { cn } from "@/lib/utils";
 import type { VoucherData, FraudResult } from "@/lib/types";
-import type { StoredVoucher } from "@/lib/db";
+import type { StoredVoucher } from "@/lib/types";
 import { parseVoucherText } from "@/lib/ocr-parser";
 import { loadPuterScript, extractTextFromImage } from "@/lib/puter-ocr";
 import { DropZone } from "@/components/drop-zone";
@@ -39,10 +39,13 @@ export default function App() {
   const loadHistory = async () => {
     try {
       const res = await fetch('/api/vouchers?filter=all&limit=100');
+      if (!res.ok) throw new Error(`API error: ${res.status}`);
       const data = await res.json();
-      setHistory(data.vouchers || []);
+      // Garantizar que siempre sea un array válido
+      setHistory(Array.isArray(data.vouchers) ? data.vouchers : []);
     } catch (err) {
       console.error('Error loading history:', err);
+      setHistory([]); // Evita que history quede undefined
     }
   };
 
