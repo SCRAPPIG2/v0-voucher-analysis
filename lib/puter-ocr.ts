@@ -33,14 +33,24 @@ export async function extractTextFromImage(
   imageDataUrl: string,
   puterReady: boolean
 ): Promise<string> {
+  console.log("[v0] extractTextFromImage called, puterReady:", puterReady, "window.puter:", !!window.puter);
+  
   if (puterReady && window.puter) {
-    const base64 = imageDataUrl.split(",")[1];
-    const bytes = atob(base64);
-    const arr = new Uint8Array(bytes.length);
-    for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
-    const file = new File([arr], "voucher.jpg", { type: "image/jpeg" });
-    const result = await window.puter.ai.img2txt(file);
-    return typeof result === "string" ? result : result?.text || "";
+    try {
+      const base64 = imageDataUrl.split(",")[1];
+      const bytes = atob(base64);
+      const arr = new Uint8Array(bytes.length);
+      for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
+      const file = new File([arr], "voucher.jpg", { type: "image/jpeg" });
+      console.log("[v0] Calling puter.ai.img2txt with file size:", file.size);
+      const result = await window.puter.ai.img2txt(file);
+      console.log("[v0] Puter OCR result:", result);
+      const text = typeof result === "string" ? result : result?.text || "";
+      return text;
+    } catch (err) {
+      console.error("[v0] Puter OCR error:", err);
+      throw err;
+    }
   }
 
   // Simulacion para demo cuando Puter.js no esta disponible
