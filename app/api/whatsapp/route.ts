@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+﻿import { NextRequest, NextResponse } from 'next/server';
 import type { VoucherData } from '@/lib/types';
 
 const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN!;
@@ -29,10 +29,10 @@ export async function POST(request: NextRequest) {
     if (!message) return NextResponse.json({ status: 'no message' }, { status: 200 });
     const from = message.from;
     if (message.type !== 'image') {
-      await sendWhatsAppMessage(from, 'Hola! Soy ControlBankDS. Envíame una imagen de tu comprobante de pago para analizarlo.');
+      await sendWhatsAppMessage(from, 'Hola! Soy ControlBankDS. Envíame una imagen de tu comprobante.');
       return NextResponse.json({ status: 'ok' }, { status: 200 });
     }
-    await sendWhatsAppMessage(from, 'Recibí tu comprobante. Analizando... un momento.');
+    await sendWhatsAppMessage(from, 'Recibí tu comprobante. Analizando...');
     const imageId = message.image.id;
     const imageUrl = await getWhatsAppMediaUrl(imageId);
     const imageBase64 = await downloadImageAsBase64(imageUrl);
@@ -48,7 +48,7 @@ export async function POST(request: NextRequest) {
     await sendWhatsAppMessage(from, resultMessage);
     return NextResponse.json({ status: 'ok' }, { status: 200 });
   } catch (error) {
-    console.error('Error en webhook WhatsApp:', error);
+    console.error('Error:', error);
     return NextResponse.json({ status: 'error' }, { status: 200 });
   }
 }
@@ -70,12 +70,49 @@ async function downloadImageAsBase64(url: string): Promise<string> {
 }
 
 async function extractVoucherDataWithGPT(imageBase64: string): Promise<VoucherData> {
-  const prompt = `Analiza este comprobante de pago bancario y extrae los datos en formato JSON. Devuelve SOLO el JSON sin texto adicional con esta estructura: {"transaction_id": "string o null", "reference_number": "string o null", "bank_serial": "string o null", "bank_origin": "string o null", "bank_destination": "string o null", "amount": numero o null, "currency": "COP", "issue_date": "YYYY-MM-DD o null", "beneficiary": "string o null", "sender_name": "string o null", "transfer_type": "string o null", "payment_concept": "string o null", "raw_text": "todo el texto visible"}`;
+  const prompt = 'Analiza este comprobante bancario. Devuelve SOLO JSON: {"transaction_id":null,"reference_number":null,"bank_serial":null,"bank_origin":null,"bank_destination":null,"amount":null,"currency":"COP","issue_date":null,"beneficiary":null,"sender_name":null,"transfer_type":null,"payment_concept":null,"raw_text":""}';
   const response = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${OPENAI_API_KEY}` },
     body: JSON.stringify({
       model: 'gpt-4o',
       max_tokens: 1000,
-      messages: [{ role: 'user', content: [
-        { type: 'text', text: pr
+      messages: [{ role: 'user', content: [{ type: 'text', text: prompt }, { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${imageBase64}` } }] }],
+    }),
+  });
+  const data = await response.json();
+  const content = data.choices?.[0]?.message?.content || '{}';
+  try {
+    return JSON.parse(content.replace(/```json|```/g, '').trim()) as VoucherData;
+  } catch {
+    return { transaction_id: null, reference_number: null, bank_serial: null, bank_origin: null, bank_destination: null, amount: null, currency: 'COP', issue_date: null, beneficiary: null, sender_name: null, transfer_type: null, payment_concept: null, raw_text: content };
+  }
+}
+
+async function sendWhatsAppMessage(to: string, text: string): Promise<void> {
+  await fetch(`https://graph.facebook.com/v18.0/${PHONE_NUMBER_ID}/messages`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${WHATSAPP_TOKEN}` },
+    body: JSON.stringify({ messaging_product: 'whatsapp', to, type: 'text', text: { body: text } }),
+  });
+}
+
+function formatResultMessage(voucher: VoucherData, result: any): string {
+  const { fraudAnalysis } = result;
+  const statusEmoji: Record<string, string> = { CLEAN: '✅', SUSPICIOUS: '⚠️', DUPLICATE: '🚨' };
+  const statusLabel: Record<string, string> = { CLEAN: 'LEGITIMO', SUSPICIOUS: 'SOSPECHOSO', DUPLICATE: 'DUPLICADO' };
+  const status = fraudAnalysis?.fraudStatus || 'UNKNOWN';
+  const score = fraudAnalysis?.fraudScore ?? 0;
+  const flags: string[] = fraudAnalysis?.fraudFlags || [];
+  let msg = `🏦 *CONTROLBANKDS*\n\n${statusEmoji[status] || '❓'} *${statusLabel[status] || status}*\n📊 Riesgo: *${score}/100*\n\n📋 *Datos:*\n`;
+  if (voucher.bank_origin) msg += `• Banco origen: ${voucher.bank_origin}\n`;
+  if (voucher.bank_destination) msg += `• Banco destino: ${voucher.bank_destination}\n`;
+  if (voucher.amount) msg += `• Monto: ${voucher.currency} ${voucher.amount.toLocaleString()}\n`;
+  if (voucher.issue_date) msg += `• Fecha: ${voucher.issue_date}\n`;
+  if (voucher.sender_name) msg += `• Remitente: ${voucher.sender_name}\n`;
+  if (voucher.beneficiary) msg += `• Beneficiario: ${voucher.beneficiary}\n`;
+  if (voucher.reference_number) msg += `• Referencia: ${voucher.reference_number}\n`;
+  if (flags.length > 0) { msg += `\n🚩 *Alertas:*\n`; flags.forEach((f: string) => { msg += `• ${f}\n`; }); }
+  msg += `\n_ControlBankDS_`;
+  return msg;
+}
