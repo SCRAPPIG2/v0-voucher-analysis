@@ -41,7 +41,7 @@ export async function POST(request: NextRequest) {
     const analysisResponse = await fetch(`${baseUrl}/api/analyze-voucher`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ voucherData }),
+      body: JSON.stringify({ voucherData, whatsappNumber: from }),
     });
     const analysisResult = await analysisResponse.json();
     const resultMessage = formatResultMessage(voucherData, analysisResult);
@@ -101,10 +101,10 @@ function formatResultMessage(voucher: VoucherData, result: any): string {
   const { fraudAnalysis } = result;
   const statusEmoji: Record<string, string> = { CLEAN: '✅', SUSPICIOUS: '⚠️', DUPLICATE: '🚨' };
   const statusLabel: Record<string, string> = { CLEAN: 'LEGITIMO', SUSPICIOUS: 'SOSPECHOSO', DUPLICATE: 'DUPLICADO' };
-  const status = fraudAnalysis?.fraudStatus || 'UNKNOWN';
+  const status = fraudAnalysis?.fraudStatus || 'CLEAN';
   const score = fraudAnalysis?.fraudScore ?? 0;
   const flags: string[] = fraudAnalysis?.fraudFlags || [];
-  let msg = `🏦 *CONTROLBANKDS*\n\n${statusEmoji[status] || '❓'} *${statusLabel[status] || status}*\n📊 Riesgo: *${score}/100*\n\n📋 *Datos:*\n`;
+  let msg = `🏦 *CONTROLBANKDS*\n\n${statusEmoji[status] || '✅'} *${statusLabel[status] || status}*\n📊 Riesgo: *${score}/100*\n\n📋 *Datos:*\n`;
   if (voucher.bank_origin) msg += `• Banco origen: ${voucher.bank_origin}\n`;
   if (voucher.bank_destination) msg += `• Banco destino: ${voucher.bank_destination}\n`;
   if (voucher.amount) msg += `• Monto: ${voucher.currency} ${voucher.amount.toLocaleString()}\n`;
