@@ -1,4 +1,4 @@
-﻿import { neon } from '@neondatabase/serverless';
+import { neon } from '@neondatabase/serverless';
 import type { VoucherData } from './types';
 
 const sql = neon(process.env.DATABASE_URL || '');
@@ -31,7 +31,7 @@ export async function saveVoucher(
         ${data.bank_origin || null}, ${data.bank_destination || null}, ${data.transfer_type || null},
         ${data.amount || null}, ${data.currency || 'COP'}, ${data.issue_date || null},
         ${data.beneficiary || null}, ${data.sender_name || null}, ${data.payment_concept || null},
-        ${fraudStatus}, ${fraudScore}, ${JSON.stringify(fraudFlags)}, ${whatsappNumber || null}
+        ${fraudStatus}, ${fraudScore}, ${JSON.stringify(fraudFlags || [])}, ${whatsappNumber || null}
       )
       RETURNING *
     `;
