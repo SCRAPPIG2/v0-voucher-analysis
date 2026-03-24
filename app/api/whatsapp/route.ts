@@ -1,5 +1,6 @@
 ﻿import { NextRequest, NextResponse } from 'next/server';
 import type { VoucherData } from '@/lib/types';
+import { getClientByPhone } from '@/lib/db';
 
 const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN!;
 const WHATSAPP_VERIFY_TOKEN = process.env.WHATSAPP_VERIFY_TOKEN!;
@@ -28,8 +29,11 @@ export async function POST(request: NextRequest) {
     const message = body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
     if (!message) return NextResponse.json({ status: 'no message' }, { status: 200 });
     const from = message.from;
+    const client = await getClientByPhone(from);
+    const clientName = client?.name || null;
     if (message.type !== 'image') {
-      await sendWhatsAppMessage(from, 'Hola! Soy ControlBankDS. Envíame una imagen de tu comprobante.');
+      const greeting = clientName ? `Hola ${clientName}! Soy ControlBankDS. Envíame una imagen de tu comprobante.` : 'Hola! Soy ControlBankDS. Envíame una imagen de tu comprobante.';
+      await sendWhatsAppMessage(from, greeting);
       return NextResponse.json({ status: 'ok' }, { status: 200 });
     }
     await sendWhatsAppMessage(from, 'Recibí tu comprobante. Analizando...');
@@ -41,10 +45,10 @@ export async function POST(request: NextRequest) {
     const analysisResponse = await fetch(`${baseUrl}/api/analyze-voucher`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ voucherData, whatsappNumber: from }),
+      body: JSON.stringify({ voucherData, whatsappNumber: from, clientName }),
     });
     const analysisResult = await analysisResponse.json();
-    const resultMessage = formatResultMessage(voucherData, analysisResult);
+    const resultMessage = formatResultMessage(voucherData, analysisResult, clientName);
     await sendWhatsAppMessage(from, resultMessage);
     return NextResponse.json({ status: 'ok' }, { status: 200 });
   } catch (error) {
@@ -97,14 +101,16 @@ async function sendWhatsAppMessage(to: string, text: string): Promise<void> {
   });
 }
 
-function formatResultMessage(voucher: VoucherData, result: any): string {
+function formatResultMessage(voucher: VoucherData, result: any, clientName: string | null): string {
   const { fraudAnalysis } = result;
   const statusEmoji: Record<string, string> = { CLEAN: '✅', SUSPICIOUS: '⚠️', DUPLICATE: '🚨' };
   const statusLabel: Record<string, string> = { CLEAN: 'LEGITIMO', SUSPICIOUS: 'SOSPECHOSO', DUPLICATE: 'DUPLICADO' };
   const status = fraudAnalysis?.fraudStatus || 'CLEAN';
   const score = fraudAnalysis?.fraudScore ?? 0;
   const flags: string[] = fraudAnalysis?.fraudFlags || [];
-  let msg = `🏦 *CONTROLBANKDS*\n\n${statusEmoji[status] || '✅'} *${statusLabel[status] || status}*\n📊 Riesgo: *${score}/100*\n\n📋 *Datos:*\n`;
+  let msg = `🏦 *CONTROLBANKDS*\n\n${statusEmoji[status] || '✅'} *${statusLabel[status] || status}*\n📊 Riesgo: *${score}/100*\n`;
+  if (clientName) msg += `👤 Cliente: *${clientName}*\n`;
+  msg += `\n📋 *Datos:*\n`;
   if (voucher.bank_origin) msg += `• Banco origen: ${voucher.bank_origin}\n`;
   if (voucher.bank_destination) msg += `• Banco destino: ${voucher.bank_destination}\n`;
   if (voucher.amount) msg += `• Monto: ${voucher.currency} ${voucher.amount.toLocaleString()}\n`;

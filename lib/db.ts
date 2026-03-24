@@ -1,4 +1,4 @@
-import { neon } from '@neondatabase/serverless';
+﻿import { neon } from '@neondatabase/serverless';
 import type { VoucherData } from './types';
 
 const sql = neon(process.env.DATABASE_URL || '');
@@ -9,8 +9,26 @@ export interface StoredVoucher extends VoucherData {
   fraud_score: number;
   fraud_flags: string[];
   whatsapp_number: string | null;
+  client_name: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface Client {
+  id: number;
+  name: string;
+  whatsapp_number: string;
+  created_at: string;
+}
+
+export async function getClientByPhone(whatsappNumber: string): Promise<Client | null> {
+  try {
+    const result = await sql`SELECT * FROM clients WHERE whatsapp_number = ${whatsappNumber} LIMIT 1`;
+    return result && result.length > 0 ? (result[0] as Client) : null;
+  } catch (error) {
+    console.error('Error getting client:', error);
+    return null;
+  }
 }
 
 export async function saveVoucher(
@@ -18,20 +36,21 @@ export async function saveVoucher(
   fraudStatus: 'CLEAN' | 'SUSPICIOUS' | 'DUPLICATE',
   fraudScore: number,
   fraudFlags: string[],
-  whatsappNumber?: string
+  whatsappNumber?: string,
+  clientName?: string
 ): Promise<StoredVoucher> {
   try {
     const result = await sql`
       INSERT INTO vouchers (
         reference_number, transaction_id, bank_serial, bank_origin, bank_destination,
         transfer_type, amount, currency, issue_date, beneficiary, sender_name,
-        payment_concept, fraud_status, fraud_score, fraud_flags, whatsapp_number
+        payment_concept, fraud_status, fraud_score, fraud_flags, whatsapp_number, client_name
       ) VALUES (
         ${data.reference_number || null}, ${data.transaction_id || null}, ${data.bank_serial || null},
         ${data.bank_origin || null}, ${data.bank_destination || null}, ${data.transfer_type || null},
         ${data.amount || null}, ${data.currency || 'COP'}, ${data.issue_date || null},
         ${data.beneficiary || null}, ${data.sender_name || null}, ${data.payment_concept || null},
-        ${fraudStatus}, ${fraudScore}, ${JSON.stringify(fraudFlags || [])}, ${whatsappNumber || null}
+        ${fraudStatus}, ${fraudScore}, ${JSON.stringify(fraudFlags || [])}, ${whatsappNumber || null}, ${clientName || null}
       )
       RETURNING *
     `;
