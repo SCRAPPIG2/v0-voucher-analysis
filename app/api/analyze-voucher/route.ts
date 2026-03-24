@@ -8,18 +8,19 @@ export const runtime = 'nodejs';
 interface AnalyzeRequest {
   voucherData: VoucherData;
   whatsappNumber?: string;
+  clientName?: string;
 }
 
 export async function POST(request: NextRequest) {
   try {
     const body = (await request.json()) as AnalyzeRequest;
-    const { voucherData, whatsappNumber } = body;
+    const { voucherData, whatsappNumber, clientName } = body;
     if (!voucherData) {
       return NextResponse.json({ error: 'No voucher data provided' }, { status: 400 });
     }
     const existingVouchers = await getAllVouchers(500);
     const fraudResult = checkDuplicates(voucherData, existingVouchers);
-    const storedVoucher = await saveVoucher(voucherData, fraudResult.fraudStatus, fraudResult.fraudScore, fraudResult.fraudFlags, whatsappNumber);
+    const storedVoucher = await saveVoucher(voucherData, fraudResult.fraudStatus, fraudResult.fraudScore, fraudResult.fraudFlags, whatsappNumber, clientName);
     if (fraudResult.fraudStatus === 'DUPLICATE' && fraudResult.duplicateOf) {
       let originalVoucher = null;
       if (fraudResult.duplicateOf.reference_number) {
