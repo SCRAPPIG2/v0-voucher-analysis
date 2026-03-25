@@ -1,6 +1,7 @@
 ﻿import { NextRequest, NextResponse } from 'next/server';
 import type { VoucherData } from '@/lib/types';
 import { getClientByPhone } from '@/lib/db';
+import { analyzeVoucherForensics } from '@/lib/forensic-analysis';
 
 const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN!;
 const WHATSAPP_VERIFY_TOKEN = process.env.WHATSAPP_VERIFY_TOKEN!;
@@ -40,15 +41,18 @@ export async function POST(request: NextRequest) {
     const imageId = message.image.id;
     const imageUrl = await getWhatsAppMediaUrl(imageId);
     const imageBase64 = await downloadImageAsBase64(imageUrl);
-    const voucherData = await extractVoucherDataWithGPT(imageBase64);
+    const [voucherData, forensicResult] = await Promise.all([
+      extractVoucherDataWithGPT(imageBase64),
+      analyzeVoucherForensics(imageBase64, OPENAI_API_KEY, '3134852878'),
+    ]);
     const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'https://v0-voucher-analysis.vercel.app';
     const analysisResponse = await fetch(`${baseUrl}/api/analyze-voucher`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ voucherData, whatsappNumber: from, clientName, imageBase64 }),
+      body: JSON.stringify({ voucherData, whatsappNumber: from, clientName }),
     });
     const analysisResult = await analysisResponse.json();
-    const resultMessage = formatResultMessage(voucherData, analysisResult, clientName);
+    const resultMessage = formatResultMessage(voucherData, analysisResult, forensicResult, clientName);
     await sendWhatsAppMessage(from, resultMessage);
     return NextResponse.json({ status: 'ok' }, { status: 200 });
   } catch (error) {
@@ -101,19 +105,16 @@ async function sendWhatsAppMessage(to: string, text: string): Promise<void> {
   });
 }
 
-function formatResultMessage(voucher: VoucherData, result: any, clientName: string | null): string {
-  const { fraudAnalysis, forensicAnalysis } = result;
+function formatResultMessage(voucher: VoucherData, result: any, forensicResult: any, clientName: string | null): string {
+  const { fraudAnalysis } = result;
   const statusEmoji: Record<string, string> = { CLEAN: '✅', SUSPICIOUS: '⚠️', DUPLICATE: '🚨' };
   const statusLabel: Record<string, string> = { CLEAN: 'LEGITIMO', SUSPICIOUS: 'SOSPECHOSO', DUPLICATE: 'DUPLICADO' };
   const status = fraudAnalysis?.fraudStatus || 'CLEAN';
   const score = fraudAnalysis?.fraudScore ?? 0;
   const flags: string[] = fraudAnalysis?.fraudFlags || [];
-  let msg = `🏦 *CONTROLBANKDS*\n\n${statusEmoji[status] || '✅'} *${statusLabel[status] || status}*\n📊 Riesgo duplicado: *${score}/100*\n`;
-  if (forensicAnalysis) {
-    const authScore = forensicAnalysis.authenticityScore ?? 100;
-    const authEmoji = authScore >= 70 ? '✅' : authScore >= 40 ? '⚠️' : '🚨';
-    msg += `${authEmoji} Autenticidad: *${authScore}/100*\n`;
-  }
+  const authScore = forensicResult?.authenticityScore ?? 100;
+  const authEmoji = authScore >= 70 ? '✅' : authScore >= 40 ? '⚠️' : '🚨';
+  let msg = `🏦 *CONTROLBANKDS*\n\n${statusEmoji[status] || '✅'} *${statusLabel[status] || status}*\n📊 Riesgo duplicado: *${score}/100*\n${authEmoji} Autenticidad: *${authScore}/100*\n`;
   if (clientName) msg += `👤 Cliente: *${clientName}*\n`;
   msg += `\n📋 *Datos:*\n`;
   if (voucher.bank_origin) msg += `• Banco origen: ${voucher.bank_origin}\n`;
@@ -127,9 +128,9 @@ function formatResultMessage(voucher: VoucherData, result: any, clientName: stri
     msg += `\n🚩 *Alertas de duplicado:*\n`;
     flags.forEach((f: string) => { msg += `• ${f}\n`; });
   }
-  if (forensicAnalysis?.forensicFlags?.length > 0) {
+  if (forensicResult?.forensicFlags?.length > 0) {
     msg += `\n🔬 *Alertas forenses:*\n`;
-    forensicAnalysis.forensicFlags.forEach((f: string) => { msg += `• ${f}\n`; });
+    forensicResult.forensicFlags.forEach((f: string) => { msg += `• ${f}\n`; });
   }
   msg += `\n_ControlBankDS_`;
   return msg;
