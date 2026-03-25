@@ -45,7 +45,7 @@ export async function POST(request: NextRequest) {
     const analysisResponse = await fetch(`${baseUrl}/api/analyze-voucher`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ voucherData, whatsappNumber: from, clientName }),
+      body: JSON.stringify({ voucherData, whatsappNumber: from, clientName, imageBase64 }),
     });
     const analysisResult = await analysisResponse.json();
     const resultMessage = formatResultMessage(voucherData, analysisResult, clientName);
@@ -102,13 +102,18 @@ async function sendWhatsAppMessage(to: string, text: string): Promise<void> {
 }
 
 function formatResultMessage(voucher: VoucherData, result: any, clientName: string | null): string {
-  const { fraudAnalysis } = result;
+  const { fraudAnalysis, forensicAnalysis } = result;
   const statusEmoji: Record<string, string> = { CLEAN: '✅', SUSPICIOUS: '⚠️', DUPLICATE: '🚨' };
   const statusLabel: Record<string, string> = { CLEAN: 'LEGITIMO', SUSPICIOUS: 'SOSPECHOSO', DUPLICATE: 'DUPLICADO' };
   const status = fraudAnalysis?.fraudStatus || 'CLEAN';
   const score = fraudAnalysis?.fraudScore ?? 0;
   const flags: string[] = fraudAnalysis?.fraudFlags || [];
-  let msg = `🏦 *CONTROLBANKDS*\n\n${statusEmoji[status] || '✅'} *${statusLabel[status] || status}*\n📊 Riesgo: *${score}/100*\n`;
+  let msg = `🏦 *CONTROLBANKDS*\n\n${statusEmoji[status] || '✅'} *${statusLabel[status] || status}*\n📊 Riesgo duplicado: *${score}/100*\n`;
+  if (forensicAnalysis) {
+    const authScore = forensicAnalysis.authenticityScore ?? 100;
+    const authEmoji = authScore >= 70 ? '✅' : authScore >= 40 ? '⚠️' : '🚨';
+    msg += `${authEmoji} Autenticidad: *${authScore}/100*\n`;
+  }
   if (clientName) msg += `👤 Cliente: *${clientName}*\n`;
   msg += `\n📋 *Datos:*\n`;
   if (voucher.bank_origin) msg += `• Banco origen: ${voucher.bank_origin}\n`;
@@ -118,7 +123,14 @@ function formatResultMessage(voucher: VoucherData, result: any, clientName: stri
   if (voucher.sender_name) msg += `• Remitente: ${voucher.sender_name}\n`;
   if (voucher.beneficiary) msg += `• Beneficiario: ${voucher.beneficiary}\n`;
   if (voucher.reference_number) msg += `• Referencia: ${voucher.reference_number}\n`;
-  if (flags.length > 0) { msg += `\n🚩 *Alertas:*\n`; flags.forEach((f: string) => { msg += `• ${f}\n`; }); }
+  if (flags.length > 0) {
+    msg += `\n🚩 *Alertas de duplicado:*\n`;
+    flags.forEach((f: string) => { msg += `• ${f}\n`; });
+  }
+  if (forensicAnalysis?.forensicFlags?.length > 0) {
+    msg += `\n🔬 *Alertas forenses:*\n`;
+    forensicAnalysis.forensicFlags.forEach((f: string) => { msg += `• ${f}\n`; });
+  }
   msg += `\n_ControlBankDS_`;
   return msg;
 }
