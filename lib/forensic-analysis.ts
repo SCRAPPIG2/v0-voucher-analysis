@@ -17,27 +17,18 @@ export async function analyzeVoucherForensics(
   openaiApiKey: string,
   expectedBeneficiary?: string
 ): Promise<ForensicResult> {
-  const prompt = `Eres un experto en detección de fraude de comprobantes bancarios colombianos. Analiza esta imagen en detalle.
+  const prompt = `Analiza este comprobante bancario colombiano y responde SOLO con JSON valido, sin texto adicional:
+{"authenticityScore":85,"isScreenPhoto":false,"isEdited":false,"isFraudApp":false,"hasValidQR":true,"visualConsistency":true,"beneficiaryMatch":true,"flags":[]}
 
-Debes detectar:
-1. Es una foto de pantalla (no captura directa)? Busca: pixelado, reflejos, bordes curvos, fondo fisico
-2. Fue editada con apps de edicion? Busca: inconsistencias en fuentes, colores alterados, texto superpuesto
-3. Fue generada por app fraudulenta como NequiDz? Busca: proporciones incorrectas, colores distintos al original
-4. El codigo QR es valido y legible? Corresponde a Nequi/Bancolombia real?
-5. Las fuentes, colores, espaciado son consistentes con el banco real?
-6. El beneficiario mostrado es: "${expectedBeneficiary || 'no especificado'}"?
-
-Responde SOLO con este JSON sin texto adicional:
-{
-  "authenticityScore": 0,
-  "isScreenPhoto": false,
-  "isEdited": false,
-  "isFraudApp": false,
-  "hasValidQR": true,
-  "visualConsistency": true,
-  "beneficiaryMatch": true,
-  "flags": []
-}`;
+Criterios:
+- authenticityScore: 0-100 (100=autentico, 0=falso)
+- isScreenPhoto: true si es foto de pantalla y no captura directa
+- isEdited: true si fue editada con app
+- isFraudApp: true si parece generada por NequiDz u app falsa
+- hasValidQR: true si el QR es valido y legible
+- visualConsistency: true si fuentes y colores son correctos para el banco
+- beneficiaryMatch: true si el numero Nequi o cuenta coincide con ${expectedBeneficiary || 'no especificado'}
+- flags: lista de problemas encontrados en español`;
 
   try {
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -48,13 +39,13 @@ Responde SOLO con este JSON sin texto adicional:
       },
       body: JSON.stringify({
         model: 'gpt-4o',
-        max_tokens: 1000,
+        max_tokens: 500,
         messages: [
           {
             role: 'user',
             content: [
               { type: 'text', text: prompt },
-              { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${imageBase64}` } },
+              { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${imageBase64}`, detail: 'low' } },
             ],
           },
         ],
@@ -66,11 +57,11 @@ Responde SOLO con este JSON sin texto adicional:
     const parsed = JSON.parse(content.replace(/```json|```/g, '').trim());
     const flags: string[] = parsed.flags || [];
 
-    if (parsed.isScreenPhoto) flags.push('Foto de pantalla detectada - no es captura directa');
-    if (parsed.isEdited) flags.push('Imagen editada - posible alteracion de datos');
+    if (parsed.isScreenPhoto) flags.push('Foto de pantalla detectada');
+    if (parsed.isEdited) flags.push('Imagen editada - posible alteracion');
     if (parsed.isFraudApp) flags.push('Posible app fraudulenta (NequiDz u similar)');
-    if (!parsed.hasValidQR) flags.push('QR invalido, ilegible o no corresponde al banco');
-    if (!parsed.visualConsistency) flags.push('Inconsistencias visuales en fuentes, colores o proporciones');
+    if (!parsed.hasValidQR) flags.push('QR invalido o ilegible');
+    if (!parsed.visualConsistency) flags.push('Inconsistencias visuales detectadas');
     if (!parsed.beneficiaryMatch && expectedBeneficiary) flags.push('Beneficiario no coincide con la cuenta del negocio');
 
     return {
